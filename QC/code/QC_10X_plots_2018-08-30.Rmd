@@ -1,13 +1,9 @@
----
-title: 10X Standard QC Plots
+# 10X Standard QC Plots
 author: Carmen
 date: Aug 30, 2018
-output:
-  html_document:
-    df_print: paged
----
+View rendered version of this document here: https://carmensandoval.github.io/QC_10X_plots_2018-08-30.html
 
-### User input: Prepare session.
+## 1. User input: Prepare session.
 
 To run this R Markdown file, enter the following lines in R:
 ```{r eval=FALSE}
@@ -51,7 +47,7 @@ Call the `knitr::render` function indicating the path to this `.Rmd` file:
 render("/kriegsteinlab/data1/carmen/2nd-trimester/qc/code/QC_10X_plots_2018-08-30.Rmd")
 ```
 
-### Begin R Markdown script:
+## 2. R Markdown script begins:
 ```{r knitr-opts_chunk}
 knitr::opts_chunk$set(cache = TRUE, warning = FALSE, message = FALSE, cache.lazy = FALSE)
 ```
