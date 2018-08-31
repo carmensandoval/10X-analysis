@@ -1,10 +1,63 @@
-# QC Plots for 10X Data
-Author: Carmen S
+---
+title: 10X Standard QC Plots
+author: Carmen
+date: Aug 30, 2018
+output:
+  html_document:
+    df_print: paged
+---
 
-Date: Aug 30, 2018
+### User input: Prepare session.
+
+To run this R Markdown file, enter the following lines in R:
+```{r eval=FALSE}
+library(rmarkdown)
+library(knitr)
+```
+
+Age of the dataset. 
+```{r eval=FALSE}
+age <- "GW14"
+```
+
+Choose an upper limit for nGenes and nUMIs for zoomed-in plots.
+```{r eval=FALSE}
+nGene.limit <- 3500
+nUMI.limit <- 10000
+```
+
+Indicate the path to your list of ribosomal gene names.
+```{r eval=FALSE}
+ribogenes <- read_table("/kriegsteinlab/data1/carmen/2nd-trimester/qc/ribogenes.txt", col_names = F)$X1
+```
+
+Path to your dataset (in this case, an `.RData` workspace file), and the name of the Seurat object contained within the workspace.
+We load the data before running the `.Rmd` file as this takes a long time, and is otherwise done everytime the script is run (immune to caching.)
+```{r eval=FALSE}
+dataset <- "/kriegsteinlab/data1/aparna/homefiles/gw14.RData"
+load(dataset)
+
+seurat.obj <- "gw14"
+```
+
+Indicate the path to a metadata file with cell names and their brain regions of origin.
+```{r eval=FALSE}
+meta <- read_tsv("/kriegsteinlab/data1/carmen/2nd-trimester/metadata/colnames_GW14_080818_fixed.txt", 
+                   col_names = c("cell.name", "brain.region"))
+```
+
+Call the `knitr::render` function indicating the path to this `.Rmd` file:
+```{r eval=FALSE}
+render("/kriegsteinlab/data1/carmen/2nd-trimester/qc/code/QC_10X_plots_2018-08-30.Rmd")
+```
+
+### Begin R Markdown script:
+```{r knitr-opts_chunk}
+knitr::opts_chunk$set(cache = TRUE, warning = FALSE, message = FALSE, cache.lazy = FALSE)
+```
 
 ### Load libraries
-```{r load-libraries}
+```{r load-libraries, cache=TRUE}
 library(Seurat)
 library(readr)
 library(ggplot2)
@@ -13,37 +66,18 @@ library(viridis)
 library(tidyr)
 library(dplyr)
 library(janitor)
-#library(rcartocolor)
 ```
 
-### User input
-Tell R the age of the dataset, the path to the `.RData` workspace file, and the name of the Seurat object contained within the workspace.
-Also indicate the path to a metadata file with cell names and brain regions of origin.
-```{r message=F}
-age <- "GW18"
-
-dataset <- "/kriegsteinlab/data1/aparna/homefiles/gw18.RData"
-
-seurat.obj <- "gw18"
-
-meta <- read_tsv("/kriegsteinlab/data1/carmen/2nd-trimester/metadata/colnames_GW18_080118_fixed.txt", 
-                   col_names = c("cell.name", "brain.region"))
-```
-
-### Load `.RData` workspace and create a new Seurat object using the raw data.
+### Create a new Seurat object using the raw data in the original Seurat object.
 For compatibility issues with the new version of Seurat.
 ```{r import-data, cache=TRUE}
-load(dataset)
-
 assign("seurat.obj.new", CreateSeuratObject(raw.data = get(seurat.obj)@raw.data, min.cells = 0, min.genes = 0, project=age))
-
-ribogenes <- read_table("ribogenes.txt", col_names = F)$X1
 
 rm(list=seurat.obj)
 ```
 
 ### Declare multiplot function.
-```{r multiplot-fn}
+```{r multiplot-fn, cache = TRUE}
 multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
   
   library(grid)
@@ -82,37 +116,30 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
 }
 ```
 
-### Get HEX codes for 'Vivid' color palette.
-```{r eval=FALSE}
-carto_pal(12, "Vivid")
-display_carto_pal(12, "Vivid")
-# c("#E58606", "#5D69B1", "#52BCA3", "#99C945", "#CC61B0" ,"#DAA51B", "#2F8AC4", "#764E9F")
-```
-
 ### Set the brain region of cells as their original identity in both the `@ident` and the `@meta.data` slots.
-```{r set-ident}
+```{r set-ident, cache=TRUE}
 seurat.obj.new@meta.data$orig.ident <- factor(meta$brain.region)
 
 seurat.obj.new <- SetIdent(seurat.obj.new, cells.use = WhichCells(seurat.obj.new), ident.use = meta$brain.region)
 ```
 
-```{r}
+```{r meta-summary, cache=TRUE}
 summary(seurat.obj.new@meta.data)
 ```
 
 ### Generate table with number and percentage of cells in each brain region.
-```{r}
+```{r brainregions-table, cache=TRUE}
 seurat.obj.new@meta.data %>% tabyl(orig.ident) %>% adorn_totals(where="row") %>% arrange(desc(n)) 
 ```
 
 ### Seurat's ViolinPlot plotting by area.
-Not working currently.
-```{r eval=FALSE}
+(Not working currently.)
+```{r seurat-violin, eval=FALSE}
 violin.plot <- VlnPlot(seurat.obj.new, features.plot = c("nGene", "nUMI"), do.sort = T, point.size.use = .5, ident.include = as.character(statsByArea$orig.ident))
 ```
 
 ### Calculate % of mitochondrial genes in each cell.
-```{r calc-mito}
+```{r calc-mito, cache=TRUE}
 mito.genes <- grep(pattern="^MT-", x=rownames(seurat.obj.new@data), value = TRUE)
 percent.mito <- colSums(seurat.obj.new@raw.data[mito.genes, ])/colSums(seurat.obj.new@raw.data)
 
@@ -120,7 +147,7 @@ seurat.obj.new <- AddMetaData(object = seurat.obj.new, metadata = percent.mito, 
 ```
 
 ### Calculate % of ribosomal genes in each cell.
-```{r calc-ribo}
+```{r calc-ribo, cache=TRUE}
 ribo <- seurat.obj.new@raw.data[ribogenes, ]
 percent.ribo <- colSums(ribo)/colSums(seurat.obj.new@raw.data)
 
@@ -128,7 +155,7 @@ seurat.obj.new <- AddMetaData(object = seurat.obj.new, metadata = percent.ribo, 
 ```
 
 ### Calculate mean UMIs, genes, ribosomal and mitochondrial % for each brain region.
-```{r calc-stats-by-area}
+```{r calc-stats-by-area, cache=TRUE}
 statsByArea <- seurat.obj.new@meta.data %>% dplyr::group_by(orig.ident) %>% 
   summarise(mean.nGene = mean(nGene), mean.nUMI =mean(nUMI), mean.pctmito = mean(percent.mito), mean.pctribo= mean(percent.ribo))
 
@@ -139,7 +166,7 @@ statsByArea
 ## PLOTS
 
 ### 1. Violin plot: Genes per cell, split by brain region.
-```{r p1}
+```{r p1, cache=TRUE}
 seurat.obj.new@meta.data$orig.ident <- ordered(seurat.obj.new@meta.data$orig.ident, 
                                        levels = (statsByArea %>% arrange(mean.nGene))$orig.ident)
 
@@ -166,9 +193,7 @@ p1
 
 
 ### 2. Violin plot: Genes per cell [zoom-in].
-```{r p2}
-nGene.limit <- 6000
-
+```{r p2, cache=TRUE}
 p2 <- ggplot(seurat.obj.new@meta.data) + 
   geom_jitter(aes(orig.ident, nGene, colour=orig.ident), alpha=0.2, size=0.25) + 
   geom_violin(aes(orig.ident, nGene), colour="grey60", scale = "width", alpha=0.3) +
@@ -179,7 +204,7 @@ p2 <- ggplot(seurat.obj.new@meta.data) +
         axis.title.x=element_text(vjust = -1),
         axis.text.x = element_text(angle = 30)
         ) +
-  scale_y_continuous(breaks=seq(0, nGene.limit, by=500), limits = c(0, nGene.limit)) +
+  scale_y_continuous(breaks=seq(0, nGene.limit, by=nGene.limit/10), limits = c(0, nGene.limit)) +
   scale_x_discrete(breaks=(statsByArea %>% arrange(mean.nGene))$orig.ident) +
   labs(title=paste0(age, ": Genes per Cell (Zoom)"),
        x="", 
@@ -193,7 +218,7 @@ p2
 
 
 ### 3. Violin plot: UMIs per cell, split by brain region.
-```{r p3}
+```{r p3, cache=TRUE}
 p3 <- 
   ggplot(seurat.obj.new@meta.data) + 
   geom_jitter(aes(orig.ident, nUMI, colour=orig.ident), alpha=0.2, size=0.25) + 
@@ -216,9 +241,7 @@ p3
 ```
 
 ### 4. Violin plot: UMIs per cell [Zoom-in].
-```{r p4}
-nUMI.limit <- 40000
-
+```{r p4, cache=TRUE}
 p4 <- 
   ggplot(seurat.obj.new@meta.data) + 
   geom_jitter(aes(orig.ident, nUMI, colour=orig.ident), alpha=0.2, size=0.25) + 
@@ -231,7 +254,7 @@ p4 <-
         axis.text.x = element_text(angle = 30)
         ) +
   # ylim(0, 40000) +
-  scale_y_continuous(breaks=seq(0, nUMI.limit, by=10000), limits=c(0,  nUMI.limit)) +
+  scale_y_continuous(breaks=seq(0, nUMI.limit, by=nUMI.limit/10), limits=c(0,  nUMI.limit)) +
   labs(title=paste0(age, ": UMIs per Cell (Zoom)"),
        x="", 
        y="UMIs per Cell"
@@ -242,7 +265,7 @@ p4
 ```
 
 ### 5. Violin plot: Genes per cell + color by nUMI.
-```{r p5}
+```{r p5, cache=TRUE}
 seurat.obj.new@meta.data <- seurat.obj.new@meta.data %>% arrange(nUMI)
 
 p5 <- ggplot(seurat.obj.new@meta.data %>% filter(nGene < nGene.limit)) + 
@@ -262,7 +285,7 @@ p5 <- ggplot(seurat.obj.new@meta.data %>% filter(nGene < nGene.limit)) +
         # legend.title.align = 0.9
         ) +
   # ylim(0, 40000) +
-  scale_y_continuous(breaks=seq(0, nGene.limit, by=500), limits=c(0, nGene.limit)) +
+  scale_y_continuous(breaks=seq(0, nGene.limit, by=nGene.limit/10), limits=c(0, nGene.limit)) +
   labs(title=paste0(age, ": Genes per Cell / log UMIs per Cell"),
        x="", 
        y="Genes Detected",
@@ -272,7 +295,7 @@ p5
 ```
 
 ### 6. Violin plot: UMIs per cell + color by nGenes.
-```{r p6}
+```{r p6, cache=TRUE}
 seurat.obj.new@meta.data <- seurat.obj.new@meta.data %>% arrange(nGene)
 
 p6 <- ggplot(seurat.obj.new@meta.data %>% filter(nUMI < nUMI.limit)) + 
@@ -292,7 +315,7 @@ p6 <- ggplot(seurat.obj.new@meta.data %>% filter(nUMI < nUMI.limit)) +
         # legend.title.align = 0.9
         ) +
   # ylim(0, 40000) +
-  scale_y_continuous(breaks=seq(0, nUMI.limit, by=10000), limits=c(0, nUMI.limit)) +
+  scale_y_continuous(breaks=seq(0, nUMI.limit, by=nUMI.limit/10), limits=c(0, nUMI.limit)) +
   labs(title=paste0(age, ": UMIs per Cell / Genes per Cell"),
        x="", 
        y="UMIs Detected",
@@ -302,7 +325,7 @@ p6
 ```
 
 ### 7. % Ribosomal, split by brain region.
-```{r p7}
+```{r p7, cache=TRUE}
 p7 <- 
 ggplot(seurat.obj.new@meta.data) + 
   geom_jitter(aes(orig.ident, percent.ribo, colour=orig.ident), alpha=0.2, size=0.25) + 
@@ -326,7 +349,7 @@ p7
 ```
 
 ### 8. % Mitochondrial, split by brain region.
-```{r p8}
+```{r p8, cache=TRUE}
 p8 <- 
   ggplot(seurat.obj.new@meta.data) + 
   geom_jitter(aes(orig.ident, percent.mito, colour=orig.ident), alpha=0.2, size=0.25) + 
@@ -350,7 +373,7 @@ p8
 ```
 
 ### 9. Violin plot: Genes per cell; color by % ribosomal genes.
-```{r p9}
+```{r p9, cache=TRUE}
 seurat.obj.new@meta.data <- seurat.obj.new@meta.data %>% arrange(percent.ribo)
 
 ggplot(seurat.obj.new@meta.data) + 
@@ -363,7 +386,7 @@ ggplot(seurat.obj.new@meta.data) +
         axis.title.x=element_text(vjust = -1),
         axis.text.x = element_text(angle = 30)
         ) +
-  scale_y_continuous(breaks=seq(0,8000, by=500)) +
+  scale_y_continuous(breaks=seq(0, max(seurat.obj.new@meta.data$nGene), by=1000)) +
   scale_x_discrete(breaks=(statsByArea %>% arrange(mean.nGene))$orig.ident) +
   labs(title=paste0(age, ": Genes Detected per Cell"),
        x="Area", 
@@ -372,7 +395,7 @@ ggplot(seurat.obj.new@meta.data) +
 ```
 
 ### 10. Violin plot: Genes per cell; color by % ribosomal genes [zoom-in]
-```{r p10}
+```{r p10, cache=TRUE}
 seurat.obj.new@meta.data <- seurat.obj.new@meta.data %>% arrange(percent.ribo)
 
 p10 <- ggplot(seurat.obj.new@meta.data %>% filter(nGene < nGene.limit)) + 
@@ -391,7 +414,7 @@ p10 <- ggplot(seurat.obj.new@meta.data %>% filter(nGene < nGene.limit)) +
         axis.text.x = element_text(angle = 30)
         # legend.title.align = 0.9
         ) +
-  scale_y_continuous(breaks=seq(0, nGene.limit, by=500), limits = c(0, nGene.limit)) +
+  scale_y_continuous(breaks=seq(0, nGene.limit, by=nGene.limit/10), limits = c(0, nGene.limit)) +
   scale_x_discrete(breaks=(statsByArea %>% arrange(mean.nGene))$orig.ident) +
   labs(title=paste0(age, ": Genes per Cell / % Ribosomal Genes\n(zoom-in)"),
        x="", 
@@ -404,7 +427,7 @@ p10
 
 
 ### 11. Violin Plot: Genes per cell, color by % mitochondrial genes
-```{r p11}
+```{r p11, cache=TRUE}
 seurat.obj.new@meta.data <- seurat.obj.new@meta.data %>% arrange(percent.mito)
 
 p11 <- ggplot(seurat.obj.new@meta.data) + 
@@ -417,7 +440,7 @@ p11 <- ggplot(seurat.obj.new@meta.data) +
         axis.title.x=element_text(vjust = -1),
         axis.text.x = element_text(angle = 30)
         ) +
-  scale_y_continuous(breaks=seq(0,8000, by=500)) +
+  scale_y_continuous(breaks=seq(0, max(seurat.obj.new@meta.data$nGene), by=500)) +
   scale_x_discrete(breaks=(statsByArea %>% arrange(mean.nGene))$orig.ident) +
   labs(title=paste0(age, ": Number of Genes Detected per Cell"),
        x="Area", 
@@ -428,7 +451,7 @@ p11
 ```
 
 ### 12. Violin Plot: Genes per cell, color by % mitochondrial genes [zoom-in]
-```{r p12}
+```{r p12, cache=TRUE}
 seurat.obj.new@meta.data <- seurat.obj.new@meta.data %>% arrange(percent.mito)
 
 p12 <- ggplot(seurat.obj.new@meta.data %>% filter(nGene < nGene.limit)) + 
@@ -446,7 +469,7 @@ p12 <- ggplot(seurat.obj.new@meta.data %>% filter(nGene < nGene.limit)) +
         legend.title = element_text(size = 8),
         # legend.title.align = 0.9
         ) +
-  scale_y_continuous(breaks=seq(0, nGene.limit, by=500), limits = c(0, nGene.limit)) +
+  scale_y_continuous(breaks=seq(0, nGene.limit, by=nGene.limit/10), limits = c(0, nGene.limit)) +
   scale_x_discrete(breaks=(statsByArea %>% arrange(mean.nGene))$orig.ident) +
   labs(title=paste0(age, ": Genes per Cell / % Mitochondrial Genes"),
        x="", 
@@ -457,8 +480,8 @@ p12 <- ggplot(seurat.obj.new@meta.data %>% filter(nGene < nGene.limit)) +
 p12
 ```
 
-### 13. Violin Plot: % Ribosomal, color by % mitochondrial [zoom-in]
-```{r p13}
+### 13. Violin Plot: % Ribosomal, color by % mitochondrial.
+```{r p13, cache=TRUE}
 seurat.obj.new@meta.data <- seurat.obj.new@meta.data %>% arrange(percent.mito)
 
 p13 <- 
@@ -478,8 +501,6 @@ ggplot(seurat.obj.new@meta.data) +
         axis.text.x = element_text(angle = 30)
         # legend.title.align = 0.9
         ) +
-  # scale_y_continuous(breaks=seq(0,40000, by=5000)) +
-  # ylim(0,40000) +
   labs(title=paste0(age, ": % Ribosomal Genes / % Mitochondrial Genes per Cell"),
        x="", 
        y="% Ribosomal Genes",
@@ -490,8 +511,8 @@ p13
 ```
 
 
-### 14. Violin Plot: % Mitochondrial, color by % ribosomal [zoom-in]
-```{r p14}
+### 14. Violin Plot: % Mitochondrial, color by % ribosomal.
+```{r p14, cache=TRUE}
 seurat.obj.new@meta.data <- seurat.obj.new@meta.data %>% arrange(percent.ribo)
 
 p14 <- 
@@ -511,8 +532,6 @@ ggplot(seurat.obj.new@meta.data) +
         axis.text.x = element_text(angle = 30)
         # legend.title.align = 0.9
         ) +
-  # scale_y_continuous(breaks=seq(0,40000, by=5000)) +
-  # ylim(0,40000) +
   labs(title=paste0(age, ": % Mitochondrial Genes / % Ribosomal Genes per Cell"),
        x="", 
        y="% Mitochondrial Genes",
@@ -522,8 +541,14 @@ ggplot(seurat.obj.new@meta.data) +
 p14
 ```
 
+```{r remove-large-objects}
+meta.from.seurat <- seurat.obj.new@meta.data
+rm(seurat.obj.new, matrix_scaled, matrix_pca, ribo, cluster)
+```
+
+### Print all QC plots in a single .png file with high res for easy sharing.
 ```{r print-plots}
-png(paste0(age, "_QC_1.png"), width=25, height=16, units="in", res=120)
+png(paste0(age, "_QC_all.png"), width=25, height=16, units="in", res=120)
 
 multiplot(p1, p3, p7, p8, p2, p4, p10, p12, p5, p6, p13, p14, cols=3)
 
