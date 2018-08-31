@@ -1,7 +1,10 @@
 # 10X Standard QC Plots
 author: Carmen
+
 date: Aug 30, 2018
+
 View rendered version of this document here: https://carmensandoval.github.io/QC_10X_plots_2018-08-30.html
+
 
 ## 1. User input: Prepare session.
 
