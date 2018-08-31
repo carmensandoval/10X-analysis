@@ -1,11 +1,6 @@
----
-title: QC Plots
-author: Carmen S
-date: Aug 30, 2018
-output:
-  html_document:
-    df_print: paged
----
+# QC Plots for 10X Data
+Author: Carmen S
+Date: Aug 30, 2018
 
 ### Load libraries
 ```{r load-libraries}
