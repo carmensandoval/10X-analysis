@@ -1,0 +1,424 @@
+---
+title: "Clustering Pipeline with Seurat, PCA and Jaccard Distances - from Aparna"
+date: "Last modified: Sep 20, 2018"
+author: "Modified by: Carmen"
+output: html_notebook
+---
+
+## 0. Setup
+```{r}
+#!/usr/bin/Rscript
+
+# Obtain the ID being accessed from the array
+jobid = as.integer(Sys.getenv("PBS_ARRAYID"))
+
+# Expect command line args at the end.
+args = commandArgs(trailingOnly = TRUE)
+
+  age <- as.numeric(args[1])
+  
+  # age <- "gw22"
+  
+  perplexity <- as.numeric(args[2])
+```
+
+### 0.0 Declare functions.
+```{r}
+
+# 1
+pushbullet.start <- function(message){
+
+  RPushbullet::pbPost("note",
+    title = paste0(age, ": Started"), body = message,
+    debug = F, devices = c("Chrome"))
+}
+
+    pushbullet.start(message=paste0("R Script: Clustering"))
+
+# 2
+options(error = function() {
+  library(RPushbullet)
+  pbPost("note", title=paste("Error:", age), body=geterrmessage())
+})
+
+# 3
+pushbullet.toc <- function(){
+
+  toc(log = TRUE, quiet = TRUE)
+  message <- tic.log(format = TRUE)[[1]]
+  RPushbullet::pbPost("note", title=paste0(age, ": Finished"), body=message,
+    devices = c("Chrome"))
+  tic.clearlog()
+
+}
+
+# sort(sapply(ls(), function(x) format(object.size(get(x)), unit = 'auto')))
+
+```
+
+### 0.1 Load libraries.
+```{r}
+library(Seurat)
+library(gmodels)
+library(dplyr)
+library(Matrix)
+library(RANN)
+library(igraph)
+library(tictoc)
+source("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/code/doFastPCA.R")
+```
+
+### 0.2 Load original Seurat object.
+```{r}
+# Trial datasets:
+# gw20_34cortex.RData
+# gw22.RData
+
+tic("Loading object")
+
+  load(paste0("/kriegsteinlab/data1/aparna/homefiles/", age, ".RData"))
+
+pushbullet.toc()
+```
+
+## 1. Normalize and scale raw data
+
+### 1.1 Create Seurat object:
+```{r}
+# Object initialization for Seurat v2.3:
+
+tic("Initialize Seurat object")
+
+    assign("seurat.object", CreateSeuratObject(display.progress = F,
+                                              raw.data = get(age)@raw.data, 
+                                              min.cells = 100, min.genes = 500,
+                                              project=age)
+          )
+
+    rm(list=age)
+    
+pushbullet.toc()
+```
+
+### 1.2 Log-normalize data
+```{r}
+tic("Log-normalize data")
+
+seurat.object <- NormalizeData(seurat.object, normalization.method = "LogNormalize", 
+                                 scale.factor = 1e4, display.progress = F)
+
+pushbullet.toc()
+```
+
+### 1.3 Remove high mitochondrial % cells:
+```{r}
+tic("Remove high mitochondrial % cells")
+  
+  mito.genes <- grep("^MT-", rownames(seurat.object@data), value = T)
+  
+  percent.mito <- colSums(expm1(seurat.object@data[mito.genes,])) / colSums(expm1(seurat.object@data))
+  
+  seurat.object <- AddMetaData(seurat.object, percent.mito, "percent.mito")
+  
+  seurat.object <- SubsetData(seurat.object, subset.name = "percent.mito", accept.high = 0.10)
+  
+pushbullet.toc()
+```
+
+### 1.4 Scale
+
+#### 1.4a Scale only (without nUMI regression):
+```{r}
+tic("Scale data")
+
+seurat.object.scale <- ScaleData(seurat.object, do.scale = T, do.center = T, display.progress = F)
+
+path.scaled.object <- paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/data/scaledObjects/", age, "_seuratObject.scaleOnly.Rds")
+saveRDS(seurat.object.scale, file=path.scaled.object)
+
+pushbullet.toc()
+```
+
+#### 1.4b Scale with nUMI regression and store in a new object:
+```{r}
+tic("Scale data and regress nUMI")
+
+seurat.object.scale.regress <- ScaleData(seurat.object, vars.to.regress = "nUMI", 
+                                     do.scale = T, do.center = T, display.progress = F)
+
+path.scaled.regressed.object <- paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/data/scaledObjects/", age, "SeuratObject.scale.nUMI.Regress.Rds")
+saveRDS(seurat.object.scale.regress, file=path.scaled.regressed.object)
+
+pushbullet.toc()
+
+seurat.objects <- list(scaled=seurat.object.scale, scaled.regressed=seurat.object.scale.regress)
+
+rm(seurat.object.scale, seurat.object.scale.regress, seurat.object)
+
+```
+
+## 2. Run PCA
+
+### 2.1 Run PCA on both objects:
+
+```{r}
+# Read-in scaled objects:
+
+# path.scaled.object <- paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/data/scaledObjects/", age, "_seuratObject.scaleOnly.Rds")
+# path.scaled.regressed.object <- paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/data/scaledObjects/", age, "SeuratObject.scale.nUMI.Regress.Rds")
+# seurat.objects <- list(scaled=readRDS(path.scaled.object), scaled.regressed=readRDS(path.scaled.regressed.object))
+
+selectObject <- function(object){
+  
+  path.scaled.object <- paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/data/scaledObjects/", age, "_seuratObject.scaleOnly.Rds")
+  path.scaled.regressed.object <- paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/data/scaledObjects/", age, "SeuratObject.scale.nUMI.Regress.Rds")
+  
+                           if(object == "scaled") {
+                             scaling <<- "_scaleOnly"
+                             pca.result <<- "pca.scaled"
+                             object.path <<- path.scaled.object
+                            } 
+  
+                            if(object == "scaled.regressed") {
+                              
+                                scaling <<- "_scale_nUMIregress"
+                                pca.result <<- "pca.scaled.regressed"
+                                object.path <<- path.scaled.regressed.object
+                              
+                            }
+}
+
+
+library(foreach)
+library(doParallel)
+
+# cores <- detectCores()
+# cl <- makeCluster(2)
+# doParallel::registerDoParallel(cl)
+
+# foreach(object=names(seurat.objects)) %dopar% {
+
+for (object in names(seurat.objects)) {
+  
+    print(object)
+  
+    selectObject(object)
+  
+    print(paste(object, pca.result, scaling, pca.path))
+  
+    pushbullet.start(message = paste("PCA for", object))
+    
+    tictoc::tic(paste("PCA for", object))
+
+          assign(pca.result, doFastPCA(t(seurat.objects[[object]]@scale.data), 50,
+                 center.use = F, scale.use = F, iterative = F)
+          )
+
+
+          saveRDS(pca.result, paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/pca/pcaObject.", age, scaling, ".Rds"))
+
+      pushbullet.toc()
+    
+}
+
+```
+
+
+### 2.2 Project cells onto PCA space:
+
+```{r}
+pca.objects <- list(pca.scaled=pca.scaled, pca.scaled.regressed=pca.scaled.regressed)
+
+for (object in names(seurat.objects)){
+  
+  print(object)
+  
+  selectObject(object)
+  
+  print(pca.result)
+  
+  pushbullet.start(message = paste("PCA projection for", pca.result))
+  
+    tictoc::tic(paste("PCA projection for", pca.result))
+    
+        ev <- pca.objects[[pca.result]]$sdev^2
+      
+        u <- max(which(pca.objects[[pca.result]]$sdev^2 > (sqrt(length(row.names(seurat.objects[[object]]@data)) / length(colnames(seurat.objects[[object]]@data))) + 1) ^2))
+      
+        sig_PCAs <- pca.objects[[pca.result]]$rotation[ , 1:u]
+    
+        cells_projected_sig_PCAs <- t(seurat.objects[[object]]@scale.data) %*% sig_PCAs
+          
+    pushbullet.toc()
+    
+  pushbullet.start(message = paste("Save PCA results to Seurat object:", pca.result))
+  
+    tictoc::tic(paste("Save PCA results to Seurat object:", pca.result))
+        
+          seurat.objects[[object]] <- SetDimReduction(seurat.objects[[object]], reduction.type = "fastPCA", slot = "cell.embeddings", 
+                   new.data = cells_projected_sig_PCAs)
+    
+          seurat.objects[[object]] <- SetDimReduction(seurat.objects[[object]], reduction.type = "fastPCA", slot = "gene.loadings", 
+          new.data = pca.objects[[pca.result]]$rotation)
+    
+          seurat.objects[[object]] <- SetDimReduction(seurat.objects[[object]], reduction.type = "fastPCA", slot = "sdev", 
+          new.data =pca.objects[[pca.result]]$sdev)
+        
+          saveRDS(cells_projected_sig_PCAs, paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/pca/", age, pca.result, "projection.Rds"))
+    
+    pushbullet.toc() 
+
+  
+}
+```
+
+## 3. Clustering
+
+### 3.1 Nearest neighbor
+### 3.2 Jaccard distances
+### 3.3 Graph-based clustering
+### 3.4 Find cluster markers
+```{r}
+
+for (object in names(seurat.objects)) {
+  
+    selectObject(object)
+  
+    print(object)
+  
+    print(pca.result)
+  
+    print(object.path)
+  
+## 3.1 Nearest neighbor:
+  
+    pushbullet.start(message=paste("Nearest Neighbor", scaling))
+    
+        tic(paste("Nearest neighbor", scaling))
+        
+            cell.embeddings <- seurat.objects[[object]]@dr$fastPCA@cell.embeddings
+            
+            nearest <- nn2(cell.embeddings, k=10)
+            
+            rownames(nearest$nn.idx) <- rownames(cell.embeddings)
+            
+            
+            out.nn.idx <- paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/nn2_output_neighbors_sigPCAs_", age, scaling, ".txt")
+            write.table(nearest$nn.idx, file=out.nn.idx, sep="\t", quote=F, col.names=NA)
+            
+            out.nn.dists <- paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/nn2_output_distance_sigPCAs_", age, scaling,".txt")
+            write.table(nearest$nn.dists, file=out.nn.dists, sep="\t", quote=F, col.names=NA)
+        
+        pushbullet.toc()
+    
+### 3.2 Jaccard distance:
+    
+  pushbullet.start(message=paste("Jaccard distances", scaling))
+
+
+        tic(paste("Jaccard distances", scaling))
+          
+            jaccard.out <- paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/jaccard_weighted_edges_", age, scaling, "_fromR.txt")
+            
+            system(paste0("perl /kriegsteinlab/data1/carmen/2nd-trimester/clustering/code/jaccard_toedges2.pl ", out.nn.idx, " ", out.nn.dists, " > ", jaccard.out))
+            
+            edgedata <- read.table(jaccard.out, sep="\t", header=T)
+    
+            edges <- as.data.frame(edgedata)
+    
+            pushbullet.toc()
+    
+### 3.3 Graph-based clustering:
+        
+  pushbullet.start(message=paste("Graph-based Clustering", scaling))
+          
+      tic(paste("Calculate clusters", scaling))
+      
+              input <- graph_from_data_frame(edges, directed=FALSE)
+      
+              clusters <- cluster_louvain(input)
+      
+              clustered <- membership(clusters)
+      
+              names.col1.file <- paste0("names.in.col1_", age, scaling, ".txt")
+      
+              write(clustered, file=names.col1.file, ncol=1)
+      
+      pushbullet.toc()
+
+
+names <- edgedata[ , 1]
+
+uniquenames <- unique(names)
+
+meta <- read.table(file=names.col1.file, sep="\t")
+
+rownames(meta) <- uniquenames
+
+seurat.objects[[object]] <- AddMetaData(seurat.objects[[object]], meta, "groups")
+
+seurat.objects[[object]] <- SetAllIdent(seurat.objects[[object]], id="V1")
+
+sizes(clusters)
+
+write.table(seurat.objects[[object]]@ident, paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/clusterIdentity/clusterIdentity_", age, "_", scaling, ".txt"), sep="\t", quote=F, col.names=NA)
+
+
+### 3.4 Find cluster markers:
+
+pushbullet.start(message=paste("Find cluster markers for", scaling))
+          
+      tic(paste("Find cluster markers for", scaling))
+      
+
+cluster.markers <- FindAllMarkers(seurat.objects[[object]], min.pct = 0.25, thresh.use = 0.25, only.pos=TRUE, max.cells.per.ident=2000)
+
+write.table(cluster.markers, paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/clustermarkers_", age, "_", scaling, ".txt"), sep="\t", quote=F, col.names=T)
+
+}
+
+pushbullet.toc()
+
+saveRDS(seurat.objects[[object]], file=object.path)
+```
+
+
+## 4. Run tSNE:
+```{r}
+
+for (object in c(seurat.obj.scale, seurat.obj.scale.regress)) {
+  
+  selectObject()
+  
+    tic(paste("Run tSNE for", age, scaling))
+
+
+        object <- RunTSNE(object, reduction.use = "fastPCA", perplexity=30, dims.use = 1:ncol(sig_PCAs), do.fast = F, check_duplicates=FALSE)
+        
+        saveRDS(object@dr$tsne@cell.embeddings, file = paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/tsne/tsne_", age, "_", scaling, ".txt"))
+        
+        tic(paste("Plot TSNE", age))
+
+            pdf(paste0("/kriegsteinlab/data1/carmen/2nd-trimester/clustering/tsne", scaling, "_", perplexity,  "_", age, ".pdf"))
+    
+               TSNEPlot(object, do.label=TRUE)
+    
+            dev.off()
+
+        pushbullet.toc()
+  
+        saveRDS(object, file = object.path)
+        
+        
+    pushbullet.toc()
+
+}
+
+# Rtsne:
+
+# Rtsne(gw22@dr$fastPCA@cell.embeddings, dims = 2, initial_dims = 7, perplexity = 5,
+# theta = 0, check_duplicates = TRUE, pca = FALSE, max_iter = 1000,
+# verbose = TRUE, is_distance = FALSE, Y_init = NULL)
+```
+
+
